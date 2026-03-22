@@ -1,15 +1,20 @@
 # Python
 __pycache__/
 *.pyc
-
-# Environment
-telegram_intelligence/.env
+*.pyo
+venv/
+env/
 
 # Telethon session
 *.session
 
-# Database
+# Databases
 *.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
 
 # Screenshots
 tv_screenshots/
@@ -17,6 +22,7 @@ tv_screenshots/
 # IDE
 .idea/
 .vscode/
+*.iml
 
 # OS junk
 .DS_Store

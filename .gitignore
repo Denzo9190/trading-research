@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+telegram_intelligence/.env
+
+# Telethon session
+*.session
+
+# Database
+*.db
+
+# Screenshots
+tv_screenshots/
+
+# IDE
+.idea/
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db

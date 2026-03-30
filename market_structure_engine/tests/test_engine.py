@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from market_engine import DataFetcher, StructureEngine
+from market_structure_engine import DataFetcher, StructureEngine
 
 def main():
     fetcher = DataFetcher()

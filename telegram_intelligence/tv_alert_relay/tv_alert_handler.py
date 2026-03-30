@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import asyncio
 from telethon import TelegramClient, events, Button
@@ -212,9 +212,9 @@ async def main():
         if not symbol.endswith('/USDT'):
             symbol = f"{symbol}/USDT"
         try:
-            # Импортируем market_engine (может потребоваться добавить путь)
+            # Импортируем market_structure_engine (может потребоваться добавить путь)
             import sys
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             from market_structure_engine import DataFetcher, StructureEngine
 
             fetcher = DataFetcher()

@@ -202,6 +202,33 @@ async def main():
                 await event.reply('✅ Опубликовано со скрином.')
                 return
 
+    @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/start$'))
+    async def start_handler(event):
+        await event.reply("✅ Бот работает. Используйте /analyze BTC для анализа структуры.")
+
+    @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze (\\w+)$'))
+    async def analyze_handler(event):
+        symbol = event.pattern_match.group(1).upper()
+        if not symbol.endswith('/USDT'):
+            symbol = f"{symbol}/USDT"
+        try:
+            # Импортируем market_engine (может потребоваться добавить путь)
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from market_structure_engine import DataFetcher, StructureEngine
+
+            fetcher = DataFetcher()
+            candles = fetcher.fetch_ohlcv(symbol, '1h', limit=200)
+            structure = StructureEngine.analyze(symbol, '1h', candles)
+
+            msg = (f"📊 Анализ {symbol} (1h)\n"
+                   f"Тренд: {structure.trend.value}\n"
+                   f"Поддержки: {', '.join(str(round(l,2)) for l in structure.supports[-3:])}\n"
+                   f"Сопротивления: {', '.join(str(round(l,2)) for l in structure.resistances[-3:])}")
+            await event.reply(msg)
+        except Exception as e:
+            await event.reply(f"Ошибка: {e}")
+
     # Запуск
     asyncio.create_task(process_pending_alerts())
     asyncio.create_task(check_timeouts())

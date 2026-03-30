@@ -1,5 +1,8 @@
 import sys
 import os
+# Добавляем папку telegram_intelligence (для database.py и других модулей внутри)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Добавляем корень проекта (для market_structure_engine)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import asyncio
@@ -212,11 +215,8 @@ async def main():
         if not symbol.endswith('/USDT'):
             symbol = f"{symbol}/USDT"
         try:
-            # Импортируем market_structure_engine (может потребоваться добавить путь)
-            import sys
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             from market_structure_engine import DataFetcher, StructureEngine
-
+            
             fetcher = DataFetcher()
             candles = fetcher.fetch_ohlcv(symbol, '1h', limit=200)
             structure = StructureEngine.analyze(symbol, '1h', candles)

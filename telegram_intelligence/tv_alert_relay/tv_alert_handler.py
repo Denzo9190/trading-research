@@ -209,6 +209,10 @@ async def main():
     async def start_handler(event):
         await event.reply("✅ Бот работает. Используйте /analyze BTC для анализа структуры.")
 
+    @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze$'))
+    async def analyze_no_param_handler(event):
+        await event.reply("📊 Используйте: /analyze <символ>\nНапример: /analyze BTC")
+
     @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze (\\w+)$'))
     async def analyze_handler(event):
         symbol = event.pattern_match.group(1).upper()
@@ -216,7 +220,7 @@ async def main():
             symbol = f"{symbol}/USDT"
         try:
             from market_structure_engine import DataFetcher, StructureEngine
-            
+
             fetcher = DataFetcher()
             candles = fetcher.fetch_ohlcv(symbol, '1h', limit=200)
             structure = StructureEngine.analyze(symbol, '1h', candles)

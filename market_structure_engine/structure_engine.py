@@ -31,3 +31,16 @@ class StructureEngine:
             resistances=resistances,
             trend=trend
         )
+
+    @staticmethod
+    def get_near_levels(self, current_price: float, tolerance: float = 0.02) -> tuple[list[float], list[float]]:
+        """
+        Возвращает (поддержки ниже цены, сопротивления выше цены)
+        в пределах tolerance (2% по умолчанию) от current_price.
+        """
+        supports_below = [s for s in self.supports if s < current_price and abs(s - current_price)/current_price <= tolerance]
+        resistances_above = [r for r in self.resistances if r > current_price and abs(r - current_price)/current_price <= tolerance]
+        # сортируем: поддержки по убыванию (ближайшая к цене первой), сопротивления по возрастанию
+        supports_below.sort(reverse=True)
+        resistances_above.sort()
+        return supports_below, resistances_above

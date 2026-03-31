@@ -211,24 +211,93 @@ async def main():
 
     @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze$'))
     async def analyze_no_param_handler(event):
-        await event.reply("📊 Используйте: /analyze <символ>\nНапример: /analyze BTC")
+        await event.reply("📊 Используйте: /analyze <символ> [таймфрейм]\n"
+                          "Таймфреймы: 1m, 5m, 15m, 30m, 1h, 4h, 1d\n"
+                          "Пример: /analyze BTC 4h")
 
-    @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze (\\w+)$'))
+    @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze (\\w+)(?: (\\w+))?$'))
     async def analyze_handler(event):
         symbol = event.pattern_match.group(1).upper()
+        timeframe = event.pattern_match.group(2) or '1h'  # по умолчанию 1 час
+        # Допустимые таймфреймы для BingX (можно расширить)
+        allowed_timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
+        if timeframe not in allowed_timeframes:
+            await event.reply(f"❌ Неподдерживаемый таймфрейм. Используйте: {', '.join(allowed_timeframes)}")
+            return
+
         if not symbol.endswith('/USDT'):
             symbol = f"{symbol}/USDT"
+
         try:
             from market_structure_engine import DataFetcher, StructureEngine
-
             fetcher = DataFetcher()
-            candles = fetcher.fetch_ohlcv(symbol, '1h', limit=200)
-            structure = StructureEngine.analyze(symbol, '1h', candles)
+            candles = fetcher.fetch_ohlcv(symbol, timeframe, limit=200)
+            structure = StructureEngine.analyze(symbol, timeframe, candles)
 
-            msg = (f"📊 Анализ {symbol} (1h)\n"
-                   f"Тренд: {structure.trend.value}\n"
-                   f"Поддержки: {', '.join(str(round(l,2)) for l in structure.supports[-3:])}\n"
-                   f"Сопротивления: {', '.join(str(round(l,2)) for l in structure.resistances[-3:])}")
+            current_price = candles[-1].close
+
+            # Функция кластеризации (та же, что в предыдущем варианте)
+            def cluster_levels(levels, tolerance=0.002):
+                if not levels:
+                    return []
+                levels = sorted(levels)
+                clusters = []
+                current_cluster = [levels[0]]
+                for lvl in levels[1:]:
+                    if (lvl - current_cluster[-1]) / current_cluster[-1] < tolerance:
+                        current_cluster.append(lvl)
+                    else:
+                        clusters.append((min(current_cluster), max(current_cluster)))
+                        current_cluster = [lvl]
+                clusters.append((min(current_cluster), max(current_cluster)))
+                return clusters
+
+            supports = structure.supports
+            resistances = structure.resistances
+
+            support_zones = cluster_levels([s for s in supports if s < current_price])
+            resistance_zones = cluster_levels([r for r in resistances if r > current_price])
+
+            support_zones.sort(key=lambda z: current_price - z[1], reverse=True)
+            resistance_zones.sort(key=lambda z: z[0] - current_price)
+
+            near_supports = support_zones[:3]
+            near_resistances = resistance_zones[:3]
+
+            def annotate_zone(z, levels):
+                count = sum(1 for l in levels if z[0] <= l <= z[1])
+                if count >= 3:
+                    return " 💪 (сильная)"
+                return ""
+
+            msg = (f"📊 {symbol} ({timeframe})\n"
+                   f"Текущая цена: {current_price:.0f} ⚪\n"
+                   f"Тренд: {structure.trend.value}\n")
+
+            if near_supports:
+                msg += "🟢 Ближайшие поддержки:\n"
+                for i, (low, high) in enumerate(near_supports):
+                    if low == high:
+                        item = f"уровень {low:.0f}"
+                    else:
+                        item = f"зона {low:.0f}–{high:.0f}"
+                    annotation = annotate_zone((low, high), supports)
+                    msg += f"  {i+1}. {item}{annotation}\n"
+            else:
+                msg += "🟢 Ближайших поддержек не найдено\n"
+
+            if near_resistances:
+                msg += "⚫ Ближайшие сопротивления:\n"
+                for i, (low, high) in enumerate(near_resistances):
+                    if low == high:
+                        item = f"уровень {low:.0f}"
+                    else:
+                        item = f"зона {low:.0f}–{high:.0f}"
+                    annotation = annotate_zone((low, high), resistances)
+                    msg += f"  {i+1}. {item}{annotation}\n"
+            else:
+                msg += "⚫ Ближайших сопротивлений не найдено"
+
             await event.reply(msg)
         except Exception as e:
             await event.reply(f"Ошибка: {e}")

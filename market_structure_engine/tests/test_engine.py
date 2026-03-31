@@ -1,20 +1,9 @@
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from market_structure_engine.data_fetcher import DataFetcher
+from market_structure_engine.structure_engine import StructureEngine
 
-from market_structure_engine import DataFetcher, StructureEngine
-
-def main():
-    fetcher = DataFetcher()
-    symbol = 'BTC/USDT'
-    timeframe = '1h'
-    candles = fetcher.fetch_ohlcv(symbol, timeframe, limit=200)
-    structure = StructureEngine.analyze(symbol, timeframe, candles)
-
-    print(f"Анализ {symbol} ({timeframe}):")
-    print(f"Тренд: {structure.trend.value}")
-    print(f"Поддержки: {', '.join(str(round(l,2)) for l in structure.supports[:5])}")
-    print(f"Сопротивления: {', '.join(str(round(l,2)) for l in structure.resistances[:5])}")
-
-if __name__ == '__main__':
-    main()
+fetcher = DataFetcher()
+candles = fetcher.fetch_ohlcv('BTC/USDT', '1h', limit=200)
+structure = StructureEngine.analyze('BTC/USDT', '1h', candles)
+print(f"Тренд: {structure.trend.value}")
+print(f"Поддержки: {[float(l) for l in structure.supports[:3]]}")
+print(f"Сопротивления: {[float(r) for r in structure.resistances[:3]]}")

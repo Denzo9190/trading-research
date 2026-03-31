@@ -213,7 +213,7 @@ async def main():
     async def analyze_no_param_handler(event):
         await event.reply("📊 Используйте: /analyze <символ> [таймфрейм]\n"
                           "Таймфреймы: 1m, 5m, 15m, 30m, 1h, 4h, 1d\n"
-                          "Пример: /analyze BTC 4h")
+                          "Пример: `/analyze BTC 4h`")
 
     @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze (\\w+)(?: (\\w+))?$'))
     async def analyze_handler(event):

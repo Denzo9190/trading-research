@@ -237,7 +237,6 @@ async def main():
 
             current_price = candles[-1].close
 
-            # Функция кластеризации для зон S/R
             def cluster_levels(levels, tolerance=0.002):
                 if not levels:
                     return []
@@ -253,11 +252,11 @@ async def main():
                 clusters.append((min(current_cluster), max(current_cluster)))
                 return clusters
 
-            supports = structure.supports
-            resistances = structure.resistances
+            supports_raw = [s for s in structure.supports if s < current_price]
+            resistances_raw = [r for r in structure.resistances if r > current_price]
 
-            support_zones = cluster_levels([s for s in supports if s < current_price])
-            resistance_zones = cluster_levels([r for r in resistances if r > current_price])
+            support_zones = cluster_levels(supports_raw)
+            resistance_zones = cluster_levels(resistances_raw)
 
             support_zones.sort(key=lambda z: current_price - z[1], reverse=True)
             resistance_zones.sort(key=lambda z: z[0] - current_price)
@@ -267,9 +266,7 @@ async def main():
 
             def annotate_zone(z, levels):
                 count = sum(1 for l in levels if z[0] <= l <= z[1])
-                if count >= 3:
-                    return " 💪 (сильная)"
-                return ""
+                return " 💪 (сильная)" if count >= 3 else ""
 
             msg = (f"📊 {symbol} ({timeframe})\n"
                    f"Текущая цена: {current_price:.0f} ⚪\n"
@@ -282,7 +279,7 @@ async def main():
                         item = f"уровень {low:.0f}"
                     else:
                         item = f"зона {low:.0f}–{high:.0f}"
-                    annotation = annotate_zone((low, high), supports)
+                    annotation = annotate_zone((low, high), supports_raw)
                     msg += f"  {i+1}. {item}{annotation}\n"
             else:
                 msg += "🟢 Ближайших поддержек не найдено\n"
@@ -294,19 +291,35 @@ async def main():
                         item = f"уровень {low:.0f}"
                     else:
                         item = f"зона {low:.0f}–{high:.0f}"
-                    annotation = annotate_zone((low, high), resistances)
+                    annotation = annotate_zone((low, high), resistances_raw)
                     msg += f"  {i+1}. {item}{annotation}\n"
             else:
                 msg += "⚫ Ближайших сопротивлений не найдено\n"
 
-            # ========== ДОБАВЛЯЕМ ВЫВОД ЛИКВИДНОСТИ ==========
-            liquidity_data = LiquidityMapEngine.analyze(structure, atr_period=14, k=0.2, lookback=5)
+            # ========== LIQUIDITY MAP ==========
 
-            # Отфильтруем зоны, которые находятся в пределах 2% от текущей цены
+            # Передаём в движок уже отфильтрованные и кластеризованные уровни
+            resistance_levels = [high for (low, high) in near_resistances]
+            support_levels = [low for (low, high) in near_supports]
+
+            liquidity_data = LiquidityMapEngine.analyze(
+                structure,
+                resistance_levels=resistance_levels,
+                support_levels=support_levels,
+                percent=0.0003,        # 0.03%
+                atr_mult=0.08,         # 8% от ATR
+                lookback=5
+            )
+
+            # Фильтруем зоны ликвидности по направлению (только впереди цены)
             nearby_zones = []
             for zone in liquidity_data["zones"]:
-                if abs(zone.zone_low - current_price) / current_price < 0.02 or abs(zone.zone_high - current_price) / current_price < 0.02:
-                    nearby_zones.append(zone)
+                if zone.zone_type in ("above_swing_high", "above_resistance"):
+                    if zone.zone_low > current_price:
+                        nearby_zones.append(zone)
+                elif zone.zone_type in ("below_swing_low", "below_support"):
+                    if zone.zone_high < current_price:
+                        nearby_zones.append(zone)
 
             if nearby_zones:
                 msg += "\n⚡ Ближайшие зоны ликвидности:\n"

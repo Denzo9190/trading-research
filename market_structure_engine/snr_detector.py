@@ -3,13 +3,8 @@ import numpy as np
 from .models import Candle
 
 class SNRDetector:
-    """
-    Обнаружение уровней поддержки/сопротивления через swing highs/lows.
-    """
-
     @staticmethod
     def _is_swing_high(candles: List[Candle], i: int, left: int = 2, right: int = 2) -> bool:
-        """Проверяет, является ли свеча i локальным максимумом."""
         if i - left < 0 or i + right >= len(candles):
             return False
         current_high = candles[i].high
@@ -22,7 +17,6 @@ class SNRDetector:
 
     @staticmethod
     def _is_swing_low(candles: List[Candle], i: int, left: int = 2, right: int = 2) -> bool:
-        """Проверяет, является ли свеча i локальным минимумом."""
         if i - left < 0 or i + right >= len(candles):
             return False
         current_low = candles[i].low
@@ -33,11 +27,19 @@ class SNRDetector:
                 return False
         return True
 
+    @classmethod
+    def detect_swings(cls, candles: List[Candle], left: int = 2, right: int = 2) -> Tuple[List[float], List[float]]:
+        highs = []
+        lows = []
+        for i in range(len(candles)):
+            if cls._is_swing_high(candles, i, left, right):
+                highs.append(candles[i].high)
+            if cls._is_swing_low(candles, i, left, right):
+                lows.append(candles[i].low)
+        return highs, lows
+
     @staticmethod
     def _cluster_levels(levels: List[float], tolerance: float = 0.001) -> List[float]:
-        """
-        Кластеризует близкие уровни. tolerance – относительное отклонение (0.001 = 0.1%).
-        """
         if not levels:
             return []
         levels = sorted(levels)
@@ -56,17 +58,7 @@ class SNRDetector:
     def detect_supports_resistances(cls, candles: List[Candle],
                                     swing_window: int = 2,
                                     cluster_tolerance: float = 0.001) -> Tuple[List[float], List[float]]:
-        """
-        Возвращает (supports, resistances).
-        """
-        highs = []
-        lows = []
-        for i in range(len(candles)):
-            if cls._is_swing_high(candles, i, left=swing_window, right=swing_window):
-                highs.append(candles[i].high)
-            if cls._is_swing_low(candles, i, left=swing_window, right=swing_window):
-                lows.append(candles[i].low)
-
+        highs, lows = cls.detect_swings(candles, left=swing_window, right=swing_window)
         resistances = cls._cluster_levels(highs, tolerance=cluster_tolerance)
         supports = cls._cluster_levels(lows, tolerance=cluster_tolerance)
         return supports, resistances

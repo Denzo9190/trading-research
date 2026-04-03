@@ -218,8 +218,7 @@ async def main():
     @client.on(events.NewMessage(from_users=ADMIN_USER_ID, pattern='^/analyze (\\w+)(?: (\\w+))?$'))
     async def analyze_handler(event):
         symbol = event.pattern_match.group(1).upper()
-        timeframe = event.pattern_match.group(2) or '1h'  # по умолчанию 1 час
-        # Допустимые таймфреймы для BingX (можно расширить)
+        timeframe = event.pattern_match.group(2) or '1h'
         allowed_timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
         if timeframe not in allowed_timeframes:
             await event.reply(f"❌ Неподдерживаемый таймфрейм. Используйте: {', '.join(allowed_timeframes)}")
@@ -230,13 +229,15 @@ async def main():
 
         try:
             from market_structure_engine import DataFetcher, StructureEngine
+            from market_structure_engine.liquidity_engine import LiquidityMapEngine
+
             fetcher = DataFetcher()
             candles = fetcher.fetch_ohlcv(symbol, timeframe, limit=200)
             structure = StructureEngine.analyze(symbol, timeframe, candles)
 
             current_price = candles[-1].close
 
-            # Функция кластеризации (та же, что в предыдущем варианте)
+            # Функция кластеризации для зон S/R
             def cluster_levels(levels, tolerance=0.002):
                 if not levels:
                     return []
@@ -296,9 +297,32 @@ async def main():
                     annotation = annotate_zone((low, high), resistances)
                     msg += f"  {i+1}. {item}{annotation}\n"
             else:
-                msg += "⚫ Ближайших сопротивлений не найдено"
+                msg += "⚫ Ближайших сопротивлений не найдено\n"
+
+            # ========== ДОБАВЛЯЕМ ВЫВОД ЛИКВИДНОСТИ ==========
+            liquidity_data = LiquidityMapEngine.analyze(structure, atr_period=14, k=0.2, lookback=5)
+
+            # Отфильтруем зоны, которые находятся в пределах 2% от текущей цены
+            nearby_zones = []
+            for zone in liquidity_data["zones"]:
+                if abs(zone.zone_low - current_price) / current_price < 0.02 or abs(zone.zone_high - current_price) / current_price < 0.02:
+                    nearby_zones.append(zone)
+
+            if nearby_zones:
+                msg += "\n⚡ Ближайшие зоны ликвидности:\n"
+                for zone in nearby_zones[:3]:
+                    zone_desc = zone.zone_type.replace('_', ' ')
+                    msg += f"  • {zone_desc}: {zone.zone_low:.0f}–{zone.zone_high:.0f}\n"
+
+            if liquidity_data["sweeps"]:
+                msg += "\n🧹 Свежие свипы ликвидности:\n"
+                for sweep in liquidity_data["sweeps"][:3]:
+                    zone = sweep.zone
+                    zone_desc = zone.zone_type.replace('_', ' ')
+                    msg += f"  • {zone_desc} на {zone.zone_low:.0f}–{zone.zone_high:.0f} ({sweep.sweep_type})\n"
 
             await event.reply(msg)
+
         except Exception as e:
             await event.reply(f"Ошибка: {e}")
 

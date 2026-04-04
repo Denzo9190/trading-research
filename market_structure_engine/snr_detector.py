@@ -57,7 +57,7 @@ class SNRDetector:
     @classmethod
     def detect_supports_resistances(cls, candles: List[Candle],
                                     swing_window: int = 2,
-                                    cluster_tolerance: float = 0.001) -> Tuple[List[float], List[float]]:
+                                    cluster_tolerance: float = 0.002) -> Tuple[List[float], List[float]]:
         highs, lows = cls.detect_swings(candles, left=swing_window, right=swing_window)
         resistances = cls._cluster_levels(highs, tolerance=cluster_tolerance)
         supports = cls._cluster_levels(lows, tolerance=cluster_tolerance)

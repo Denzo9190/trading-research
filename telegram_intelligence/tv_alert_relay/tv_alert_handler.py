@@ -324,9 +324,24 @@ async def main():
             if nearby_zones:
                 msg += "\n⚡ Ближайшие зоны ликвидности:\n"
                 for zone in nearby_zones[:3]:
-                    zone_desc = zone.zone_type.replace('_', ' ')
-                    # Выводим с количеством касаний (сила пока опущена, но можно добавить позже)
-                    msg += f"  • {zone_desc}: {zone.zone_low:.0f}–{zone.zone_high:.0f} (касаний: {zone.touch_count})\n"
+                    # Определяем подпись в зависимости от touch_count
+                    if zone.zone_type in ("equal_high", "swing_high", "above_resistance"):
+                        if zone.touch_count >= 3:
+                            zone_label = "equal highs"
+                        elif zone.touch_count == 2:
+                            zone_label = "liquidity cluster"
+                        else:
+                            zone_label = "liquidity zone"  # fallback
+                    elif zone.zone_type in ("equal_low", "swing_low", "below_support"):
+                        if zone.touch_count >= 3:
+                            zone_label = "equal lows"
+                        elif zone.touch_count == 2:
+                            zone_label = "liquidity cluster"
+                        else:
+                            zone_label = "liquidity zone"
+                    else:
+                        zone_label = zone.zone_type.replace('_', ' ')
+                    msg += f"  • {zone_label}: {zone.zone_low:.0f}–{zone.zone_high:.0f} (касаний: {zone.touch_count})\n"
 
             if liquidity_data["sweeps"]:
                 msg += "\n🧹 Свежие свипы ликвидности:\n"

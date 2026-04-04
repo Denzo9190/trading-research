@@ -301,23 +301,23 @@ async def main():
             # Передаём в движок уже отфильтрованные и кластеризованные уровни
             resistance_levels = [high for (low, high) in near_resistances]
             support_levels = [low for (low, high) in near_supports]
-
+            # ========== LIQUIDITY MAP ENGINE v0.2 ==========
             liquidity_data = LiquidityMapEngine.analyze(
                 structure,
-                resistance_levels=resistance_levels,
-                support_levels=support_levels,
-                percent=0.0003,        # 0.03%
-                atr_mult=0.08,         # 8% от ATR
-                lookback=5
+                current_price=current_price,
+                lookback=100,
+                max_distance_pct=0.0025,
+                max_width_pct=0.0035,
+                sweep_lookback=5
             )
 
             # Фильтруем зоны ликвидности по направлению (только впереди цены)
             nearby_zones = []
             for zone in liquidity_data["zones"]:
-                if zone.zone_type in ("above_swing_high", "above_resistance"):
+                if zone.zone_type in ("equal_high", "swing_high", "above_resistance"):   # типы, где зона над ценой
                     if zone.zone_low > current_price:
                         nearby_zones.append(zone)
-                elif zone.zone_type in ("below_swing_low", "below_support"):
+                elif zone.zone_type in ("equal_low", "swing_low", "below_support"):      # типы, где зона под ценой
                     if zone.zone_high < current_price:
                         nearby_zones.append(zone)
 
@@ -325,7 +325,8 @@ async def main():
                 msg += "\n⚡ Ближайшие зоны ликвидности:\n"
                 for zone in nearby_zones[:3]:
                     zone_desc = zone.zone_type.replace('_', ' ')
-                    msg += f"  • {zone_desc}: {zone.zone_low:.0f}–{zone.zone_high:.0f}\n"
+                    # Выводим с количеством касаний (сила пока опущена, но можно добавить позже)
+                    msg += f"  • {zone_desc}: {zone.zone_low:.0f}–{zone.zone_high:.0f} (касаний: {zone.touch_count})\n"
 
             if liquidity_data["sweeps"]:
                 msg += "\n🧹 Свежие свипы ликвидности:\n"

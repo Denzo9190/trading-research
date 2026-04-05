@@ -350,6 +350,22 @@ async def main():
                     zone_desc = zone.zone_type.replace('_', ' ')
                     msg += f"  • {zone_desc} на {zone.zone_low:.0f}–{zone.zone_high:.0f} ({sweep.sweep_type})\n"
 
+            # ========== IMBALANCE ENGINE ==========
+            from market_structure_engine.imbalance_engine import ImbalanceEngine
+            imbalance_data = ImbalanceEngine.analyze(
+                structure,
+                min_size_atr=0.35,
+                max_distance_atr=2.5
+            )
+            if imbalance_data["fvgs"]:
+                msg += "\n⚡ Imbalances (FVG):\n"
+                for fvg in imbalance_data["fvgs"][:3]:
+                    if fvg.type == "bearish":
+                        direction = "шорт FVG"
+                    else:
+                        direction = "лонг FVG"
+                    msg += f"  • {direction}: {fvg.price_low:.0f}–{fvg.price_high:.0f} ({fvg.age} св. назад)\n"
+
             await event.reply(msg)
 
         except Exception as e:

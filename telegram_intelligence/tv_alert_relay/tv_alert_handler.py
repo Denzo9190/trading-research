@@ -343,12 +343,27 @@ async def main():
                         zone_label = zone.zone_type.replace('_', ' ')
                     msg += f"  • {zone_label}: {zone.zone_low:.0f}–{zone.zone_high:.0f} (касаний: {zone.touch_count})\n"
 
-            if liquidity_data["sweeps"]:
-                msg += "\n🧹 Свежие свипы ликвидности:\n"
-                for sweep in liquidity_data["sweeps"][:3]:
-                    zone = sweep.zone
-                    zone_desc = zone.zone_type.replace('_', ' ')
-                    msg += f"  • {zone_desc} на {zone.zone_low:.0f}–{zone.zone_high:.0f} ({sweep.sweep_type})\n"
+            # Старый блок (удалить)
+            # if liquidity_data["sweeps"]:
+            #     msg += "\n🧹 Свежие свипы ликвидности:\n"
+            #     for sweep in liquidity_data["sweeps"][:3]:
+            #         zone = sweep.zone
+            #         zone_desc = zone.zone_type.replace('_', ' ')
+            #         msg += f"  • {zone_desc} на {zone.zone_low:.0f}–{zone.zone_high:.0f} ({sweep.sweep_type})\n"
+
+            # ========== LIQUIDITY SWEEP ENGINE ==========
+            from market_structure_engine.liquidity_sweep_engine import LiquiditySweepEngine
+            sweep_data = LiquiditySweepEngine.analyze(structure, liquidity_data["zones"], lookback=20)
+            if sweep_data["sweeps"]:
+                msg += "\n⚡ Liquidity sweeps:\n"
+                for sweep in sweep_data["sweeps"][:3]:
+                    if sweep.type == "above":
+                        direction = "sweep above"
+                    else:
+                        direction = "sweep below"
+                    # Преобразуем source в читаемый вид
+                    source_name = sweep.source.replace('_', ' ')
+                    msg += f"  • {direction} {source_name} ({sweep.bars_ago} св. назад)\n"
 
             # ========== IMBALANCE ENGINE ==========
             from market_structure_engine.imbalance_engine import ImbalanceEngine

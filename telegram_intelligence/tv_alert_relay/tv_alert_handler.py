@@ -353,17 +353,23 @@ async def main():
 
             # ========== LIQUIDITY SWEEP ENGINE ==========
             from market_structure_engine.liquidity_sweep_engine import LiquiditySweepEngine
-            sweep_data = LiquiditySweepEngine.analyze(structure, liquidity_data["zones"], lookback=20)
+            # Адаптивный lookback в зависимости от таймфрейма
+            if timeframe in ('1m', '5m', '15m'):
+                sweep_lookback = 30
+            elif timeframe in ('30m', '1h'):
+                sweep_lookback = 15
+            else:  # 4h, 1d
+                sweep_lookback = 10
+            sweep_data = LiquiditySweepEngine.analyze(structure, liquidity_data["zones"], lookback=sweep_lookback)
             if sweep_data["sweeps"]:
-                msg += "\n⚡ Liquidity sweeps:\n"
+                msg += "\n⚡ Свипы ликвидности:\n"
                 for sweep in sweep_data["sweeps"][:3]:
                     if sweep.type == "above":
-                        direction = "sweep above"
+                        direction = "выше"
                     else:
-                        direction = "sweep below"
-                    # Преобразуем source в читаемый вид
+                        direction = "ниже"
                     source_name = sweep.source.replace('_', ' ')
-                    msg += f"  • {direction} {source_name} ({sweep.bars_ago} св. назад)\n"
+                    msg += f"  • свип {direction} {source_name} ({sweep.bars_ago} св. назад)\n"
 
             # ========== IMBALANCE ENGINE ==========
             from market_structure_engine.imbalance_engine import ImbalanceEngine

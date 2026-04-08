@@ -1,41 +1,15 @@
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict
 from dataclasses import dataclass
-from enum import Enum
 from .models import MarketStructure, Candle
-
-class EventType(Enum):
-    LIQUIDITY_POOL = "liquidity_pool"
-    LIQUIDITY_SWEEP = "liquidity_sweep"
-    # позже: FVG, ORDER_BLOCK, STRUCTURE_BREAK, RANGE
-
-@dataclass
-class MarketEvent:
-    event_type: EventType
-    subtype: str           # "equal_high", "equal_low", "swing_high", "swing_low", "above_resistance", "below_support"
-    price_low: float
-    price_high: float
-    strength: float        # 0..1
-    timestamp: int         # время последнего касания или свечи
-    tf: str                # таймфрейм
-    metadata: Dict = None  # дополнительные поля (touch_count, cluster_width, sweep_depth и т.д.)
 
 @dataclass
 class LiquidityZone:
-    level: float
     zone_low: float
     zone_high: float
     zone_type: str
-    touch_count: int
-    cluster_width: float
-    age: int
+    touches: int
     strength: float
-
-@dataclass
-class LiquiditySweep:
-    zone: LiquidityZone
-    timestamp: int
-    sweep_type: str
-    price_extreme: float
+    distance: float
 
 class LiquidityMapEngine:
     @staticmethod
@@ -51,172 +25,102 @@ class LiquidityMapEngine:
             tr_values.append(tr)
         return sum(tr_values[-period:]) / period
 
+    @staticmethod
+    def _is_swing_high(candles: List[Candle], i: int, left: int = 2, right: int = 2) -> bool:
+        if i - left < 0 or i + right >= len(candles):
+            return False
+        current = candles[i].high
+        for j in range(i - left, i + right + 1):
+            if j == i:
+                continue
+            if candles[j].high >= current:
+                return False
+        return True
+
+    @staticmethod
+    def _is_swing_low(candles: List[Candle], i: int, left: int = 2, right: int = 2) -> bool:
+        if i - left < 0 or i + right >= len(candles):
+            return False
+        current = candles[i].low
+        for j in range(i - left, i + right + 1):
+            if j == i:
+                continue
+            if candles[j].low <= current:
+                return False
+        return True
+
     @classmethod
-    def cluster_swings(cls, swings: List[float],
-                       max_distance_pct: float = 0.0025,   # 0.25%
-                       max_width_pct: float = 0.0035) -> List[Dict]:
-        """
-        Группирует близкие свинги в кластеры.
-        Возвращает список кластеров с ключами: low, high, touches, last_idx.
-        """
+    def detect_swings(cls, candles: List[Candle]) -> tuple:
+        highs = []
+        lows = []
+        for i in range(len(candles)):
+            if cls._is_swing_high(candles, i):
+                highs.append(candles[i].high)
+            if cls._is_swing_low(candles, i):
+                lows.append(candles[i].low)
+        return highs, lows
+
+    @classmethod
+    def cluster_swings(cls, swings: List[float], atr: float, cluster_threshold: float = 0.2) -> List[Dict]:
         if not swings:
             return []
         swings_sorted = sorted(swings)
         clusters = []
         current = [swings_sorted[0]]
         for s in swings_sorted[1:]:
-            if (s - current[-1]) / current[-1] <= max_distance_pct:
+            if (s - current[-1]) <= cluster_threshold * atr:
                 current.append(s)
             else:
-                clusters.append(current)
-                current = [s]
-        clusters.append(current)
-
-        # Вторичная кластеризация: разбиваем слишком широкие кластеры
-        final = []
-        for cluster in clusters:
-            low = min(cluster)
-            high = max(cluster)
-            width_pct = (high - low) / low
-            if width_pct <= max_width_pct:
-                final.append({
-                    "low": low,
-                    "high": high,
-                    "touches": len(cluster),
-                    "last_idx": -1
+                clusters.append({
+                    "low": min(current),
+                    "high": max(current),
+                    "touches": len(current)
                 })
-            else:
-                # разбиваем на более мелкие части (жадным алгоритмом)
-                sub = []
-                sub_cluster = [cluster[0]]
-                for val in cluster[1:]:
-                    if (val - sub_cluster[-1]) / sub_cluster[-1] <= max_distance_pct:
-                        sub_cluster.append(val)
-                    else:
-                        sub.append(sub_cluster)
-                        sub_cluster = [val]
-                sub.append(sub_cluster)
-                for sc in sub:
-                    final.append({
-                        "low": min(sc),
-                        "high": max(sc),
-                        "touches": len(sc),
-                        "last_idx": -1
-                    })
-        # Фильтр: отбрасываем кластеры с одним касанием (не кластер)
-        final = [c for c in final if c["touches"] >= 2]
-        return final
-
-    @classmethod
-    def detect_clusters(cls, structure: MarketStructure, lookback: int = 100,
-                        max_distance_pct: float = 0.0025,
-                        max_width_pct: float = 0.0035) -> Tuple[List[Dict], List[Dict]]:
-        """
-        Обнаруживает кластеры свингов за последние lookback свечей.
-        Возвращает (high_clusters, low_clusters).
-        """
-        candles = structure.candles[-lookback:]
-        # Пересчитываем свинги за этот период
-        from .snr_detector import SNRDetector
-        swings_high, swings_low = SNRDetector.detect_swings(candles, left=2, right=2)
-        high_clusters = cls.cluster_swings(swings_high, max_distance_pct, max_width_pct)
-        low_clusters = cls.cluster_swings(swings_low, max_distance_pct, max_width_pct)
-        return high_clusters, low_clusters
+                current = [s]
+        clusters.append({
+            "low": min(current),
+            "high": max(current),
+            "touches": len(current)
+        })
+        return clusters
 
     @classmethod
     def build_zones(cls, high_clusters: List[Dict], low_clusters: List[Dict],
                     current_price: float, atr: float) -> List[LiquidityZone]:
-        """
-        Преобразует кластеры в LiquidityZone.
-        Для кластеров, расположенных выше цены – тип equal_high, ниже – equal_low.
-        Одиночные свинги не включаются (только кластеры с touches>=2).
-        """
         zones = []
-        # Кластеры выше цены (equal high)
         for cl in high_clusters:
-            low = cl["low"]
-            high = cl["high"]
-            touches = cl["touches"]
-            # Не добавляем слишком широкие кластеры (дополнительная защита)
-            if (high - low) / low > 0.0035:   # шире 0.35% – пропускаем
-                continue
+            zone_type = "equal_high" if cl["touches"] >= 2 else "swing_high"
+            mid = (cl["low"] + cl["high"]) / 2
             zones.append(LiquidityZone(
-                level=(low+high)/2,
-                zone_low=low,
-                zone_high=high,
-                zone_type="equal_high",
-                touch_count=touches,
-                cluster_width=high-low,
-                age=0,
-                strength=touches / (1+0)   # временно
+                zone_low=cl["low"],
+                zone_high=cl["high"],
+                zone_type=zone_type,
+                touches=cl["touches"],
+                strength=min(1.0, cl["touches"] / 6.0),
+                distance=abs(current_price - mid)
             ))
-        # Кластеры ниже цены (equal low)
         for cl in low_clusters:
-            low = cl["low"]
-            high = cl["high"]
-            touches = cl["touches"]
-            if (high - low) / low > 0.0035:
-                continue
+            zone_type = "equal_low" if cl["touches"] >= 2 else "swing_low"
+            mid = (cl["low"] + cl["high"]) / 2
             zones.append(LiquidityZone(
-                level=(low+high)/2,
-                zone_low=low,
-                zone_high=high,
-                zone_type="equal_low",
-                touch_count=touches,
-                cluster_width=high-low,
-                age=0,
-                strength=touches
+                zone_low=cl["low"],
+                zone_high=cl["high"],
+                zone_type=zone_type,
+                touches=cl["touches"],
+                strength=min(1.0, cl["touches"] / 6.0),
+                distance=abs(current_price - mid)
             ))
         return zones
 
     @classmethod
-    def detect_sweeps(cls, candles: List[Candle], zones: List[LiquidityZone], atr: float, lookback: int = 5) -> List[LiquiditySweep]:
-        sweeps = []
-        if len(candles) < 2:
-            return sweeps
-        start = max(0, len(candles) - lookback)
-        for zone in zones:
-            for i in range(start, len(candles)):
-                candle = candles[i]
-                if zone.zone_type == "equal_high":
-                    if candle.high > zone.zone_high and candle.close < zone.zone_high:
-                        depth = candle.high - zone.zone_high
-                        if depth > 0.1 * atr:
-                            sweeps.append(LiquiditySweep(
-                                zone=zone, timestamp=candle.timestamp,
-                                sweep_type="above", price_extreme=candle.high
-                            ))
-                elif zone.zone_type == "equal_low":
-                    if candle.low < zone.zone_low and candle.close > zone.zone_low:
-                        depth = zone.zone_low - candle.low
-                        if depth > 0.1 * atr:
-                            sweeps.append(LiquiditySweep(
-                                zone=zone, timestamp=candle.timestamp,
-                                sweep_type="below", price_extreme=candle.low
-                            ))
-        # Дедупликация: последний свип на зону
-        latest = {}
-        for s in sweeps:
-            key = (s.zone.zone_type, s.zone.level)
-            if key not in latest or s.timestamp > latest[key].timestamp:
-                latest[key] = s
-        return list(latest.values())
-
-    @classmethod
-    def analyze(cls, structure: MarketStructure,
-                current_price: float,
-                lookback: int = 100,
-                max_distance_pct: float = 0.0025,
-                max_width_pct: float = 0.0035,
-                sweep_lookback: int = 5) -> Dict:
-        """
-        Возвращает словарь с ключами "zones", "sweeps", "atr".
-        """
-        candles = structure.candles
+    def analyze(cls, structure: MarketStructure, current_price: float,
+                lookback: int = 150, cluster_threshold: float = 0.2,
+                distance_limit: float = 3.0) -> Dict:
+        candles = structure.candles[-lookback:]
         atr = cls.calculate_atr(candles, 14)
-        high_clusters, low_clusters = cls.detect_clusters(
-            structure, lookback, max_distance_pct, max_width_pct
-        )
-        zones = cls.build_zones(high_clusters, low_clusters, current_price, atr)
-        sweeps = cls.detect_sweeps(candles, zones, atr, sweep_lookback)
-        return {"zones": zones, "sweeps": sweeps, "atr": atr}
+        swings_high, swings_low = cls.detect_swings(candles)
+        high_clusters = cls.cluster_swings(swings_high, atr, cluster_threshold)
+        low_clusters = cls.cluster_swings(swings_low, atr, cluster_threshold)
+        all_zones = cls.build_zones(high_clusters, low_clusters, current_price, atr)
+        filtered = [z for z in all_zones if z.distance <= distance_limit * atr]
+        return {"zones": filtered, "atr": atr}

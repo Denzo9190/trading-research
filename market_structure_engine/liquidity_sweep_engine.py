@@ -1,83 +1,86 @@
-from typing import List, Dict, Any
+from typing import List
 from dataclasses import dataclass
 from .models import MarketStructure, Candle
+from .liquidity_engine import LiquidityZone
 
 @dataclass
 class LiquiditySweepEvent:
     type: str          # "above" или "below"
-    level: float       # уровень ликвидности, который был пробит
-    source: str        # "equal_high", "equal_low", "liquidity_cluster", "resistance", "support"
-    bars_ago: int      # сколько свечей назад произошёл sweep
-    strength: float    # условная сила (пока 1.0, потом можно уточнить)
+    source: str        # "equal_high", "equal_low", "swing_high", "swing_low"
+    level: float
+    bars_ago: int
+    # Данные свечи, на которой произошёл свип
+    candle_high: float
+    candle_low: float
+    candle_close: float
+    candle_open: float = None  # опционально
 
 class LiquiditySweepEngine:
-    @staticmethod
-    def calculate_atr(candles: List[Candle], period: int = 14) -> float:
-        if len(candles) < period + 1:
-            return 0.0
-        tr_values = []
-        for i in range(1, len(candles)):
-            high = candles[i].high
-            low = candles[i].low
-            prev_close = candles[i-1].close
-            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-            tr_values.append(tr)
-        return sum(tr_values[-period:]) / period
-
     @classmethod
-    def detect_sweeps(cls, candles: List[Candle], liquidity_zones: List[Any], lookback: int = 20) -> List[LiquiditySweepEvent]:
-        """
-        Обнаруживает sweep ликвидности на основе предоставленных зон (из LiquidityMapEngine).
-        Каждая зона должна иметь атрибуты: zone_type, zone_low, zone_high, price_low, price_high.
-        Для простоты мы принимаем словарь с ключами 'type', 'level_low', 'level_high'.
-        """
+    def detect_sweeps(cls, candles: List[Candle], zones: List[LiquidityZone], lookback: int = 20) -> List[LiquiditySweepEvent]:
         sweeps = []
-        if len(candles) < 2:
+        if len(candles) < 5:
             return sweeps
 
+        current_price = candles[-1].close
         start_idx = max(0, len(candles) - lookback)
-        for zone in liquidity_zones:
-            # Определяем уровень
-            if zone.zone_type in ("equal_high", "above_resistance", "above_swing_high"):
-                liquidity_level = zone.zone_high
-                # Ищем самый свежий sweep: идём от конца к началу
-                for i in range(len(candles)-1, start_idx-1, -1):
-                    candle = candles[i]
-                    if candle.high > liquidity_level and candle.close < liquidity_level:
-                        bars_ago = len(candles) - i
-                        sweeps.append(LiquiditySweepEvent(
-                            type="above",
-                            level=liquidity_level,
-                            source=zone.zone_type,
-                            bars_ago=bars_ago,
-                            strength=1.0
-                        ))
-                        break  # нашли самый свежий для этой зоны
-            elif zone.zone_type in ("equal_low", "below_support", "below_swing_low"):
-                liquidity_level = zone.zone_low
-                for i in range(len(candles)-1, start_idx-1, -1):
-                    candle = candles[i]
-                    if candle.low < liquidity_level and candle.close > liquidity_level:
-                        bars_ago = len(candles) - i
-                        sweeps.append(LiquiditySweepEvent(
-                            type="below",
-                            level=liquidity_level,
-                            source=zone.zone_type,
-                            bars_ago=bars_ago,
-                            strength=1.0
-                        ))
-                        break
 
-        # Дедупликация (оставляем самый свежий для каждого уровня)
+        # средний размер свечи для displacement фильтра
+        ranges = [c.high - c.low for c in candles[-20:-1]]
+        avg_range = sum(ranges) / len(ranges) if ranges else 0
+
+        for zone in zones:
+            if zone.zone_type in ("equal_high", "swing_high"):
+                level = zone.zone_high
+                sweep_type = "above"
+            elif zone.zone_type in ("equal_low", "swing_low"):
+                level = zone.zone_low
+                sweep_type = "below"
+            else:
+                continue
+
+            # фильтр: уровень слишком далеко от текущей цены (>5%)
+            if abs(level - current_price) / current_price > 0.05:
+                continue
+
+            # проверяем только закрытые свечи (начиная с предпоследней)
+            for i in range(len(candles) - 2, start_idx - 1, -1):
+                candle = candles[i]
+
+                if sweep_type == "above":
+                    sweep_condition = (candle.high > level and candle.close < level)
+                else:
+                    sweep_condition = (candle.low < level and candle.close > level)
+
+                if not sweep_condition:
+                    continue
+
+                # displacement фильтр: свеча должна быть не меньше среднего размера
+                candle_range = candle.high - candle.low
+                if avg_range > 0 and candle_range < avg_range * 1.2:
+                    continue
+
+                sweeps.append(LiquiditySweepEvent(
+                    type=sweep_type,
+                    source=zone.zone_type,
+                    level=level,
+                    bars_ago=len(candles) - 1 - i,
+                    candle_high=candle.high,
+                    candle_low=candle.low,
+                    candle_close=candle.close,
+                    candle_open=candle.open
+                ))
+                break  # берём только самый свежий свип для этой зоны
+
+        # дедупликация: оставляем самый свежий свип для каждого (type, level)
         unique = {}
         for s in sweeps:
-            key = (s.type, s.level)
+            key = (s.type, round(s.level, 2))
             if key not in unique or s.bars_ago < unique[key].bars_ago:
                 unique[key] = s
         return list(unique.values())
 
     @classmethod
-    def analyze(cls, structure: MarketStructure, liquidity_zones: List[Any], lookback: int = 50) -> dict:
-        candles = structure.candles
-        sweeps = cls.detect_sweeps(candles, liquidity_zones, lookback)
+    def analyze(cls, structure: MarketStructure, zones: List[LiquidityZone], lookback: int = 20) -> dict:
+        sweeps = cls.detect_sweeps(structure.candles, zones, lookback)
         return {"sweeps": sweeps}

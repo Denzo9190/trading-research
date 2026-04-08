@@ -17,6 +17,9 @@ db.add_request_msg_id_column()
 
 client = None
 
+from market_structure_engine.liquidity_engine import LiquidityMapEngine
+from market_structure_engine.liquidity_sweep_engine import LiquiditySweepEngine
+
 async def publish_alert(text, photo_path=None):
     """Публикация алерта в целевой канал."""
     if db.get_setting('publish_enabled', 'true') == 'false':
@@ -297,79 +300,51 @@ async def main():
                 msg += "⚫ Ближайших сопротивлений не найдено\n"
 
             # ========== LIQUIDITY MAP ==========
-
-            # Передаём в движок уже отфильтрованные и кластеризованные уровни
-            resistance_levels = [high for (low, high) in near_resistances]
-            support_levels = [low for (low, high) in near_supports]
-            # ========== LIQUIDITY MAP ENGINE v0.2 ==========
-            liquidity_data = LiquidityMapEngine.analyze(
-                structure,
-                current_price=current_price,
-                lookback=100,
-                max_distance_pct=0.0025,
-                max_width_pct=0.0035,
-                sweep_lookback=5
-            )
-
-            # Фильтруем зоны ликвидности по направлению (только впереди цены)
-            nearby_zones = []
-            for zone in liquidity_data["zones"]:
-                if zone.zone_type in ("equal_high", "swing_high", "above_resistance"):   # типы, где зона над ценой
-                    if zone.zone_low > current_price:
-                        nearby_zones.append(zone)
-                elif zone.zone_type in ("equal_low", "swing_low", "below_support"):      # типы, где зона под ценой
-                    if zone.zone_high < current_price:
-                        nearby_zones.append(zone)
-
-            if nearby_zones:
-                msg += "\n⚡ Ближайшие зоны ликвидности:\n"
-                for zone in nearby_zones[:3]:
-                    # Определяем подпись в зависимости от touch_count
-                    if zone.zone_type in ("equal_high", "swing_high", "above_resistance"):
-                        if zone.touch_count >= 3:
-                            zone_label = "equal highs"
-                        elif zone.touch_count == 2:
-                            zone_label = "liquidity cluster"
-                        else:
-                            zone_label = "liquidity zone"  # fallback
-                    elif zone.zone_type in ("equal_low", "swing_low", "below_support"):
-                        if zone.touch_count >= 3:
-                            zone_label = "equal lows"
-                        elif zone.touch_count == 2:
-                            zone_label = "liquidity cluster"
-                        else:
-                            zone_label = "liquidity zone"
-                    else:
-                        zone_label = zone.zone_type.replace('_', ' ')
-                    msg += f"  • {zone_label}: {zone.zone_low:.0f}–{zone.zone_high:.0f} (касаний: {zone.touch_count})\n"
-
-            # Старый блок (удалить)
-            # if liquidity_data["sweeps"]:
-            #     msg += "\n🧹 Свежие свипы ликвидности:\n"
-            #     for sweep in liquidity_data["sweeps"][:3]:
-            #         zone = sweep.zone
-            #         zone_desc = zone.zone_type.replace('_', ' ')
-            #         msg += f"  • {zone_desc} на {zone.zone_low:.0f}–{zone.zone_high:.0f} ({sweep.sweep_type})\n"
+            # ---- Liquidity Engine v0.2 ----
+            liquidity_data = LiquidityMapEngine.analyze(structure, current_price, lookback=150)
+            msg += "\n⚡️ Карта ликвидности:\n"
+            if liquidity_data["zones"]:
+                above = [z for z in liquidity_data["zones"] if z.zone_low > current_price]
+                above.sort(key=lambda z: z.zone_low)
+                below = [z for z in liquidity_data["zones"] if z.zone_high < current_price]
+                below.sort(key=lambda z: z.zone_high, reverse=True)
+                if above:
+                    msg += "  сверху:\n"
+                    for i, z in enumerate(above[:3]):
+                        type_ru = "equal highs" if "equal_high" in z.zone_type else "swing high"
+                        touches_str = f" (касаний: {z.touches})" if z.touches > 1 else ""
+                        msg += f"    {i+1}. {type_ru} {z.zone_low:.0f}–{z.zone_high:.0f}{touches_str}\n"
+                else:
+                    msg += "  сверху: —\n"
+                if below:
+                    msg += "  снизу:\n"
+                    for i, z in enumerate(below[:3]):
+                        type_ru = "equal lows" if "equal_low" in z.zone_type else "swing low"
+                        touches_str = f" (касаний: {z.touches})" if z.touches > 1 else ""
+                        msg += f"    {i+1}. {type_ru} {z.zone_low:.0f}–{z.zone_high:.0f}{touches_str}\n"
+                else:
+                    msg += "  снизу: —\n"
+            else:
+                msg += "  сверху: —\n  снизу: —\n"
 
             # ========== LIQUIDITY SWEEP ENGINE ==========
-            from market_structure_engine.liquidity_sweep_engine import LiquiditySweepEngine
             # Адаптивный lookback в зависимости от таймфрейма
             if timeframe in ('1m', '5m', '15m'):
                 sweep_lookback = 30
             elif timeframe in ('30m', '1h'):
                 sweep_lookback = 15
-            else:  # 4h, 1d
+            else:
                 sweep_lookback = 10
             sweep_data = LiquiditySweepEngine.analyze(structure, liquidity_data["zones"], lookback=sweep_lookback)
             if sweep_data["sweeps"]:
-                msg += "\n⚡ Свипы ликвидности:\n"
+                msg += "\n⚡️ Свипы ликвидности:\n"
                 for sweep in sweep_data["sweeps"][:3]:
-                    if sweep.type == "above":
-                        direction = "выше"
-                    else:
-                        direction = "ниже"
+                    direction = "выше" if sweep.type == "above" else "ниже"
                     source_name = sweep.source.replace('_', ' ')
-                    msg += f"  • свип {direction} {source_name} ({sweep.bars_ago} св. назад)\n"
+                    # Показываем данные свечи (high, low, close) для проверки
+                    msg += (f"  • свип {direction} {source_name} на {sweep.level:.0f} "
+                            f"(свеча: H={sweep.candle_high:.0f} L={sweep.candle_low:.0f} C={sweep.candle_close:.0f}, "
+                            f"{sweep.bars_ago} св. назад)\n")
 
             # ========== IMBALANCE ENGINE ==========
             from market_structure_engine.imbalance_engine import ImbalanceEngine
